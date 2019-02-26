@@ -1,0 +1,8 @@
+{
+"reference":"./references/KX675261.fasta",
+"segment":"KX675261.1",
+"SVVC_dir":"./SVVC",
+"raw_data":"../Enterovirus_D68_raw_data/",
+"run":"MIC3108",
+"primers":"./primers.csv"
+}
