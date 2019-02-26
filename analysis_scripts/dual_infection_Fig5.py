@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
-#import seaborn as sns
+import seaborn as sns
 
 from create_allele_counts import load_allele_counts, nuc_alpha
 from coverage_consensus_diversity import coverage, consensus, get_fragment_boundaries
@@ -16,14 +16,13 @@ from helpers import add_panel_label, name_translations
 
 if __name__ == '__main__':
     sample_location = 'samples_by_strain/'
+    recalculate = False
 
     freqs = {}
     major_freqs = {}
     major_seqs = {}
     cov = {}
-    #snames = ['16CA514285', '16CA403717', '14CA515617']
     snames = ["EVD68_SWE_045_160831_NFLG", "EVD68_SWE_046_160904_NFLG", "EVD68_SWE_007_140908_NFLG"]
-    #ntt = name_translations('name_translation_table.tsv')
 
     for sname in snames:
         ac,ins = load_allele_counts(sample_location+sname)
@@ -37,10 +36,11 @@ if __name__ == '__main__':
     ref='KX675261.1'
     cp_labels = {0:'non coding', 1:'1st', 2:'2nd', 3:'3rd'}
     variable_sites = {}
-    fig, axs = plt.subplots(len(snames),2, figsize=(15,12),
-                    gridspec_kw={"width_ratios":[2,1]})
+    fig, axs = plt.subplots(len(snames)+1,2, figsize=(15,12),
+                    gridspec_kw={"width_ratios":[2,1], "height_ratios":[1,1,1,0.1]})
     fs=16
     for sname, ax in zip(snames, axs[:,0]):
+        print("Loading frequencies sample",sname)
         good_ind = cov[sname]>min_cov
         all_pos = np.arange(good_ind.shape[0])
         variable_sites[sname]=set()
@@ -55,7 +55,7 @@ if __name__ == '__main__':
                 if cmin>=0.01:
                     variable_sites[sname].update(np.where(ind)[0])
 
-                ax.scatter(all_pos[ind], (1-major_freqs[sname][ref])[ind], c='C%d'%i,
+                ax.scatter(all_pos[ind], (1-major_freqs[sname][ref])[ind], c='C%d'%(i+1),
                             label=cp_labels[i] if cmax>0.9 else None, alpha=a)
                 ax.set_yscale('log')
                 ax.set_ylim([0.002, 1.0])
@@ -63,76 +63,92 @@ if __name__ == '__main__':
                 #ax.text(100,0.5,ntt[sname][:-5], fontsize=fs)
                 ax.text(100,0.5,sname[:-5], fontsize=fs)
                 ax.tick_params(labelsize=0.8*fs)
-        axs[0,0].legend(loc=1,ncol=2, fontsize=0.8*fs, frameon=True, edgecolor='k')
-        axs[-1,0].set_xlabel('position in genome', fontsize=fs)
-        axs[len(snames)//2,0].set_ylabel('frequency', fontsize=fs)
+    axs[0,0].legend(loc=1,ncol=2, fontsize=0.8*fs, frameon=True, edgecolor='k')
+    axs[-2,0].set_xlabel('position in genome', fontsize=fs)
+    axs[1,0].set_ylabel('frequency', fontsize=fs)
 
-        for p in primer_boundaries[ref]:
-            y = 0.004 if int(p[1])%2 else 0.006
-            axs[-1,0].plot([primer_boundaries[ref][p]['start'], primer_boundaries[ref][p]['end']],[y,y], lw=7, c=(0.7, 0.7, 0.7))
+    for p in primer_boundaries[ref]:
+        y = int(p[1])%2
+        axs[-1,0].plot([primer_boundaries[ref][p]['start'], primer_boundaries[ref][p]['end']],[y,y], lw=7, c=(0.7, 0.7, 0.7))
+    axs[-1,0].set_axis_off()
+    axs[-1,0].set_ylim([-0.3,1.5])
 
 
     import gzip
     import cPickle as pickle
     from itertools import combinations
+    if recalculate:
+        for si,sname in enumerate(snames):
+            print("Loading pair frequencies sample",sname)
+            L = ac[0][1].shape[1]
+            n = len(variable_sites[sname])
+            pair_freq = np.zeros((n,n), dtype=float)
+            freq = np.zeros(n, dtype=float)
+
+            with gzip.open(sample_location+'%s/pair_counts.pkl.gz'%sname) as fh:
+                ac, acc = pickle.load(fh)
+            vsites = list(enumerate(sorted(variable_sites[sname])))
+            pos_map = np.array([x[1] for x in vsites])
+            for pi,pos in vsites:
+                nuc = list(nuc_alpha).index(major_seqs[sname][ref][pos])
+                tmp_cov = ac[0][1][:,pos].sum()
+                if tmp_cov>100:
+                    freq[pi] = 1.0*ac[0][1][nuc,pos]/tmp_cov
+                else:
+                    print(pos, tmp_cov)
+                    freq[pi] = np.nan
+                #freq[pi] = major_freqs[sname][ref][pos]
+
+            pair_freq = np.zeros((n,n), dtype=float)
+            p1_freq = np.zeros((n,n), dtype=float)
+            p2_freq = np.zeros((n,n), dtype=float)
+            print("Calculating LD",sname)
+            for (pi1,p1),(pi2, p2)  in combinations(vsites, 2):
+                posp = (p1,p2)
+                if posp not in acc[0][1]:
+                    continue
+
+                nn = major_seqs[sname][ref][p1]+major_seqs[sname][ref][p2]
+                if nn not in acc[0][1][posp]:
+                    continue
+
+                valid_gts = [x for x in acc[0][1][posp] if isinstance(x, str)]
+                pair_cov = 1.0*sum([acc[0][1][posp][x] for x in valid_gts])
+                if pair_cov>100:
+                    pair_freq[pi1,pi2] = acc[0][1][posp][nn]/pair_cov
+                    p1_freq[pi1,pi2] = sum([acc[0][1][posp][x] for x in valid_gts if x[0]==nn[0]])/pair_cov
+                    p2_freq[pi1,pi2] = sum([acc[0][1][posp][x] for x in valid_gts if x[1]==nn[1]])/pair_cov
+
+            pair_freq = pair_freq + pair_freq.T
+            pair_freq = np.ma.array(pair_freq, mask=pair_freq==0)
+
+            p1_freq = p1_freq + p1_freq.T
+            p1_freq = np.ma.array(p1_freq, mask=p1_freq==0)
+
+            p2_freq = p2_freq + p2_freq.T
+            p2_freq = np.ma.array(p2_freq, mask=p2_freq==0)
+
+            corr_matrix = (pair_freq - p1_freq*p2_freq)
+            tmp = np.zeros_like(pair_freq)
+            posLD = np.where(corr_matrix>0)
+            negLD = np.where(corr_matrix<=0)
+            tmp[posLD] = np.minimum(p1_freq*(1-p2_freq), (1-p1_freq)*p2_freq)[posLD]
+            tmp[negLD] = np.minimum(p1_freq*p2_freq, (1-p1_freq)*(1-p2_freq))[negLD]
+            corr_matrix/=tmp
+            print("Saving LD",sname)
+            with gzip.open(sample_location+'%s_LD_matrix.dat.gz'%sname, 'w') as fh:
+                np.savetxt(fh, corr_matrix)
+
     for si,sname in enumerate(snames):
-        L = ac[0][1].shape[1]
-        n = len(variable_sites[sname])
-        pair_freq = np.zeros((n,n), dtype=float)
-        freq = np.zeros(n, dtype=float)
+        with gzip.open(sample_location+'%s_LD_matrix.dat.gz'%sname, 'r') as fh:
+            corr_matrix = np.loadtxt(fh)
+        m = axs[si,1].matshow(corr_matrix, vmin=-1, vmax=1, cmap='RdBu_r')
+        if si==2:
+            plt.colorbar(m,cax=axs[-1,1], orientation='horizontal')
+            axs[-1,1].set_xlabel('LD', fontsize=fs)
 
-        with gzip.open(sample_location+'%s/pair_counts.pkl.gz'%sname) as fh:
-            ac, acc = pickle.load(fh)
-        vsites = list(enumerate(sorted(variable_sites[sname])))
-        pos_map = np.array([x[1] for x in vsites])
-        for pi,pos in vsites:
-            nuc = list(nuc_alpha).index(major_seqs[sname][ref][pos])
-            tmp_cov = ac[0][1][:,pos].sum()
-            if tmp_cov>100:
-                freq[pi] = 1.0*ac[0][1][nuc,pos]/tmp_cov
-            else:
-                print(pos, tmp_cov)
-                freq[pi] = np.nan
-            #freq[pi] = major_freqs[sname][ref][pos]
-
-        pair_freq = np.zeros((n,n), dtype=float)
-        p1_freq = np.zeros((n,n), dtype=float)
-        p2_freq = np.zeros((n,n), dtype=float)
-        for (pi1,p1),(pi2, p2)  in combinations(vsites, 2):
-            posp = (p1,p2)
-            if posp not in acc[0][1]:
-                continue
-
-            nn = major_seqs[sname][ref][p1]+major_seqs[sname][ref][p2]
-            if nn not in acc[0][1][posp]:
-                continue
-
-            valid_gts = [x for x in acc[0][1][posp] if isinstance(x, str)]
-            pair_cov = 1.0*sum([acc[0][1][posp][x] for x in valid_gts])
-            if pair_cov>100:
-                pair_freq[pi1,pi2] = acc[0][1][posp][nn]/pair_cov
-                p1_freq[pi1,pi2] = sum([acc[0][1][posp][x] for x in valid_gts if x[0]==nn[0]])/pair_cov
-                p2_freq[pi1,pi2] = sum([acc[0][1][posp][x] for x in valid_gts if x[1]==nn[1]])/pair_cov
-
-        pair_freq = pair_freq + pair_freq.T
-        pair_freq = np.ma.array(pair_freq, mask=pair_freq==0)
-
-        p1_freq = p1_freq + p1_freq.T
-        p1_freq = np.ma.array(p1_freq, mask=p1_freq==0)
-
-        p2_freq = p2_freq + p2_freq.T
-        p2_freq = np.ma.array(p2_freq, mask=p2_freq==0)
-
-        corr_matrix = (pair_freq - p1_freq*p2_freq)
-        tmp = np.zeros_like(pair_freq)
-        posLD = np.where(corr_matrix>0)
-        negLD = np.where(corr_matrix<=0)
-        tmp[posLD] = np.minimum(p1_freq*(1-p2_freq), (1-p1_freq)*p2_freq)[posLD]
-        tmp[negLD] = np.minimum(p1_freq*p2_freq, (1-p1_freq)*(1-p2_freq))[negLD]
-        corr_matrix/=tmp
-        axs[si,1].matshow(corr_matrix, vmin=-1, vmax=1, cmap='RdBu_r')
-        axs[si,1].set_xlabel('SNV 1')
-        axs[si,1].set_ylabel('SNV 2')
+        axs[si,1].set_xlabel('SNV 1', fontsize=fs)
+        axs[si,1].set_ylabel('SNV 2', fontsize=fs)
         axs[si,1].set_xticklabels([])
         axs[si,1].set_yticklabels([])
 
