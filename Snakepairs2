@@ -1,0 +1,22 @@
+import glob, re
+
+configfile: "snakemake_config.json"
+
+all_samples = [fname.split('/')[-1] for fname in glob.glob("samples_by_strain2/dual_infected/*")]
+print(all_samples)
+
+rule all:
+    input:
+        duals = expand('samples_by_strain2/dual_infected/{sample}/pair_counts.pkl.gz', sample=all_samples)
+
+rule pair_frequencies:
+	input:
+		"samples_by_strain2/dual_infected/{sample}/mapped_reads.bam"
+	output:
+		"samples_by_strain2/dual_infected/{sample}/" + "pair_counts.pkl.gz"
+	params:
+		path_to_script = config["SVVC_dir"] + '/src',
+		out_dir = "samples_by_strain2/dual_infected/{sample}",
+		primers = config["primers"]
+	shell:
+		"python2 {params.path_to_script}/pair_statistics.py --bam_file {input} --out_dir {params.out_dir} --primers {params.primers}"
