@@ -21,6 +21,6 @@ Such a tab-delimited file can also be used to create symlink folders with useful
 
 Here, the scripts that generate figures and analyses (in `analysis_scripts`) use the strain name of samples to access them via the symlink. This makes our code much easier to share, as it does not then contain any lab IDs, but instead the sample names we use in our paper and on GenBank.
 
-### Mapping to Reference
+## Mapping to Reference
 We found we achieved much higher coverage across the genome when we mapped sequences to a reference within the same subclade. Thus, we do an initial mapping of 100 reads against references from the B1, B3, A1, and A2 subclades, and then map against the highest scoring reference. This is automatic within the pipeline. You can check the `references_performance.csv` file that's generated for each sample to see what reference was used. You can see the current references mapped against in the `references_M` folder.
 
